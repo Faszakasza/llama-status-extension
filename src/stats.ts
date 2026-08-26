@@ -22,13 +22,7 @@ export interface SpecCounters {
 }
 
 export interface RenderView {
-	phase:
-		| "idle"
-		| "prefill"
-		| "generating"
-		| "offline"
-		| "loading"
-		| "unloaded";
+	phase: "idle" | "prefill" | "generating" | "offline" | "loading" | "unloaded";
 	tg?: number; // tokens/s, 3s sliding window
 	pf?: number; // tokens/s, 3s sliding window
 	barFrac?: number; // 0..1 prefill progress
@@ -148,7 +142,7 @@ export function observe(
 	now: number,
 	slots: SlotView[],
 ): RenderView {
-	const slot = pickSlot(slots);
+	const slot = pickSlot(slots) ?? slots[0];
 	if (!slot) return { phase: "idle" };
 
 	const st = ensure(s, slot.id);
@@ -166,24 +160,22 @@ export function observe(
 	st.seen = true;
 
 	const generating = slot.decoded > 0;
-	const frac = generating
-		? 0
-		: slot.promptTotal > 0
-			? slot.promptProcessed / slot.promptTotal
-			: 0;
+	const prefilling = slot.isProcessing && !generating;
+	// bar = prefill progress; complete (1) once prefill is done
+	const frac = prefilling
+		? slot.promptTotal > 0
+			? Math.min(1, Math.max(0, slot.promptProcessed / slot.promptTotal))
+			: 0
+		: 1;
 
-	const view: RenderView = {
-		phase: generating ? "generating" : "prefill",
+	return {
+		phase: generating ? "generating" : prefilling ? "prefill" : "idle",
+		tg: speed(st.samples, now, "decoded") ?? 0,
+		pf: speed(st.samples, now, "processed") ?? 0,
+		barFrac: frac,
+		cachePct: cachePct(slot.promptCache, slot.promptProcessed),
+		spec: s.specValue,
 	};
-	if (generating) {
-		view.tg = speed(st.samples, now, "decoded") ?? 0;
-		view.spec = s.specValue;
-	} else {
-		view.pf = speed(st.samples, now, "processed") ?? 0;
-		view.barFrac = Math.min(1, Math.max(0, frac));
-		view.cachePct = cachePct(slot.promptCache, slot.promptProcessed);
-	}
-	return view;
 }
 
 function fmt(n: number): string {

@@ -77,9 +77,7 @@ export default function (pi: ExtensionAPI) {
 			if (value === "loaded") return; // slot polling takes over
 			reset(state);
 			if (value === "loading" || value === "unloaded")
-				setStatus(
-					renderLine(target.model, { phase: value } satisfies RenderView),
-				);
+				setStatus(renderLine(target.model, { phase: value } satisfies RenderView));
 			else setStatus(`${target.model} · ${value}`); // failed/sleeping/etc
 		} catch {
 			modelStatus = "unknown";

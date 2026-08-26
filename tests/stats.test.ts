@@ -159,7 +159,7 @@ const slot = (o: Partial<SlotView> & { id: number }): SlotView => ({
 		slot({ id: 0, promptTotal: 100, promptProcessed: 0, decoded: 0 }),
 	]);
 	assert.equal(v.pf, 0, "reset clears windows");
-	assert.equal(v.spec, undefined);
+	assert.equal(v.spec, null);
 }
 
 // --- render formats (D9) ------------------------------------------------------
