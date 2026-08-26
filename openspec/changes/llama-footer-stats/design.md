@@ -59,15 +59,19 @@ Keep the last 3 s of `{t, n_decoded, n_prompt_processed}` samples (ring, cap ~20
 **D7 — Busiest slot.**
 Filter `is_processing`; prefer `n_decoded > 0`; tie-break on `n_prompt_tokens_processed + n_decoded`. Active model runs `parallel=1`, so this is mostly a correctness guard.
 
-**D8 — Offline rendering.**
-Fetch failure or non-2xx ⇒ clear the window buffer and render `<model> · offline` (no stale numbers). Recovery resumes normal rendering on the next success. No retry backoff: poll cadence is already 500 ms.
+**D8 — Status-first gating.** The router loads models on demand and unloads them after inactivity; `/slots` for a non-loaded model returns 500 (verified live), and idle-unload means the active model can be `unloaded` while pi sits idle. So the extension polls `/v1/models` (2 s) first and only polls `/slots` (500 ms) + `/metrics` (2 s) while `status == loaded`. Non-loaded statuses render `· loading` / `· unloaded` (or the raw word for `failed`/`sleeping`); a failed status fetch renders `· offline`. This avoids a misleading `offline` during load and avoids hammering `/slots` for a model that isn't there.
 
-**D9 — Render format** (single line, dim theme):
+**D9 — Offline rendering.** A status or slots fetch failure (network error / non-2xx) ⇒ clear the window buffer and render `<model> · offline` (no stale numbers). Recovery resumes normal rendering on the next success. No retry backoff: poll cadence is already 500 ms.
 
+**D10 — Render format** (single line, dim theme):
+
+- unloaded: `Qwen3.8-27B · unloaded`
+- loading: `Qwen3.8-27B · loading`
 - idle: `Qwen3.8-27B · idle`
 - prefill: `Qwen3.8-27B · pf 1.8k/s ▓▓░░░░ 34% cache 97%`
 - generating: `Qwen3.8-27B · tg 78/s spec 1.9x`
 - offline: `Qwen3.8-27B · offline`
+
 Bar: 6 chars (`▓`/`░`). Number formatting: `>=1000` → `1.2k`. Spec figure only while generating (D6).
 
 ## Risks / Trade-offs

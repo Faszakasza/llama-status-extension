@@ -102,16 +102,21 @@ When more than one slot of the active model is processing, the extension SHALL d
 - **WHEN** one slot is in prefill and another is generating
 - **THEN** the footer shows the generating slot's stats
 
-### Requirement: Unreachable or unloaded model
+### Requirement: Model lifecycle and unreachable server
+The router loads models on demand and unloads them after inactivity, so `/slots` is only meaningful while the active model is loaded. The extension SHALL poll the server's model status (e.g. `/v1/models`) and gate per-slot stats polling on the model being loaded, and SHALL render the correct lifecycle state rather than misleading `offline` stats while the model is loading or unloaded.
 
-When the server is unreachable, the active model is not loaded, or the `/slots` query fails, the extension SHALL display a degraded state (model id plus an `offline`/unavailable marker) and SHALL NOT display stale stats from a previous turn.
+#### Scenario: model not yet loaded
+- **WHEN** the active model's status is not `loaded` (e.g. `unloaded` or `loading`)
+- **THEN** the footer shows the model id plus that lifecycle marker (e.g. `· loading`) and no `/slots` or `/metrics` requests are made
+
+#### Scenario: model becomes loaded
+- **WHEN** the model status transitions to `loaded`
+- **THEN** slot stats polling begins and the footer shows idle or phase stats
 
 #### Scenario: server down
-
-- **WHEN** a poll fails (network error or non-2xx response)
-- **THEN** the footer shows `<model id> · offline` instead of the last successful stats
+- **WHEN** the status or slots poll fails (network error or non-2xx response)
+- **THEN** the footer shows `<model id> · offline` instead of stale stats from a previous turn
 
 #### Scenario: recovery
-
 - **WHEN** the next poll succeeds after failures
-- **THEN** normal phase display resumes
+- **THEN** normal lifecycle/phase display resumes
