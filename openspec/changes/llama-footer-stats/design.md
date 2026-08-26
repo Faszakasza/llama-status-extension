@@ -44,8 +44,8 @@ The server does not expose 3s-window speeds anywhere on the wire; only cumulativ
 **D2 — `ctx.ui.setStatus` instead of `ctx.ui.setFooter`.**
 `setStatus` appends to the built-in footer (which other extensions also use, e.g. token usage); `setFooter` replaces the whole footer and would clobber them. Alternative rejected.
 
-**D3 — Subdirectory layout: `index.ts` + pure `stats.ts`, no new dependencies.**
-The extension lives in `.pi/extensions/llama-stats/` (pi's project-local subdirectory discovery loads only `index.ts`): `index.ts` = pi wiring (provider/model resolution, polling, status line), `stats.ts` = pure logic (window math, turn detection, slot picking, spec acceptance, line rendering, zero pi imports) so it is testable, `stats.test.ts` = one assert-based check file run via `node --experimental-strip-types` (Node 22, no framework). Native `fetch` + `setInterval`, no npm dependencies.
+**D3 — Package layout: `src/index.ts` + pure `src/stats.ts`, no runtime dependencies.**
+The repo is a publishable pi package (layout per `gsanhueza/pi-llama-cpp`): `package.json` carries the pi manifest (`pi.extensions: ["./src/index.ts"]`, `pi-package` keyword), `src/index.ts` = pi wiring (provider/model resolution, polling, status line), `src/stats.ts` = pure logic (window math, turn detection, slot picking, spec acceptance, line rendering, zero pi imports) so it is testable, `tests/stats.test.ts` = one assert-based check file run via `npm test` (jiti, dev-only). The project consumes it like any user: `pi install -l .` (local path in `.pi/settings.json`). Native `fetch` + `setInterval`, no runtime npm dependencies.
 
 **D4 — Window math: sample ring buffer, not EMA.**
 Keep the last 3 s of `{t, n_decoded, n_prompt_processed}` samples (ring, cap ~20). Speed = (count_now − count_at_oldest_sample_within_3s) / elapsed. Partial window allowed (spec). Reset buffer on model change and when a new turn starts (turn start = slot transitions idle→processing, detected by `n_prompt_tokens_processed` dropping / `n_decoded` resetting to 0). This gives the "first 3 seconds" partial-window behavior for free.
@@ -84,8 +84,8 @@ Bar: 6 chars (`▓`/`░`). Number formatting: `>=1000` → `1.2k`. Spec figure 
 
 ## Migration Plan
 
-Deploy: drop the extension file in the project `.pi` extensions location; pi loads extensions at startup (reload or restart picks it up). Rollback: delete the file; the status line disappears with `setStatus` cleanup on dispose. No data, no schema, no service changes.
+Deploy: `pi install git:github.com/Faszakasza/llama-status-extension` (or `pi install -l .` for a local checkout) — pi loads the extension from the package manifest at startup. Rollback: `pi remove` the package; the status line disappears with `setStatus` cleanup on dispose. No data, no schema, no service changes.
 
 ## Open Questions
 
-Resolved: project-local auto-discovery (with `/reload` hot-reload support) is `.pi/extensions/` — the extension lives at `.pi/extensions/llama-stats/index.ts`. No settings entry needed.
+Resolved: the repo is a pi package — `package.json` pi manifest (`pi.extensions: ["./src/index.ts"]`) per the `pi-llama-cpp` layout. Local dev: `pi install -l .`; distribution: `pi install git:github.com/Faszakasza/llama-status-extension`. Verified: `pi config -l` lists `.. → [x] src/index.ts`.

@@ -17,11 +17,12 @@ Deliberately excluded: session token-usage/cost (another extension owns it), per
 
 ## Design
 
-- **Where**: `.pi/extensions/llama-stats/` (pi project-local auto-discovery; only `index.ts` is loaded by pi).
-  - `index.ts` — pi wiring: active-model resolution, poll loops, status line.
-  - `stats.ts` — pure logic (window math, turn detection, slot picking, spec acceptance, rendering). Zero pi imports.
-  - `stats.test.ts` — assert-based checks, run through jiti (this node build lacks `--experimental-strip-types`):
-    `node -e "require('<pi-npm>/jiti')(process.cwd(),{interopDefault:true})('./.pi/extensions/llama-stats/stats.test.ts')"`
+- **Where**: publishable pi package at the repo root (same layout as `gsanhueza/pi-llama-cpp`):
+  - `package.json` — pi manifest: `pi.extensions: ["./src/index.ts"]`, `pi-package` keyword; installed via `pi install git:github.com/Faszakasza/llama-status-extension`.
+  - `src/index.ts` — pi wiring: active-model resolution, poll loops, status line.
+  - `src/stats.ts` — pure logic (window math, turn detection, slot picking, spec acceptance, rendering). Zero pi imports.
+  - `tests/stats.test.ts` — assert-based checks, `npm test` (jiti dev-only runner; this node build lacks `--experimental-strip-types`).
+  - Local dev: `pi install -l --approve .` registers the repo root as a project package (`.pi/settings.json`, gitignored).
 - **Active model**: `ctx.model` + `model_select`; provider id form `llama-server=<baseUrl>` (fallback: `ctx.modelRegistry.getProvider(id).baseUrl`).
 - **Rendering**: `ctx.ui.setStatus("llama-stats", line)` — coexists with the built-in footer and other extensions.
 - **Polling**: `/v1/models` status 2 s **gates** everything — `/slots` 500 ms + `/metrics` 2 s only run while `status == loaded` (the router returns 500 from `/slots` for a non-loaded model, and unloads idle models). In-flight guard on `/slots`; fetch timeouts 2 s/3 s.
@@ -49,6 +50,7 @@ Deliberately excluded: session token-usage/cost (another extension owns it), per
 - [x] Live verification against the aurora router (Coder Qwen3.8-27B: tg 37–53 t/s, idle transitions, clear on non-llama; Chat Qwen3.6-35B-A3B: full prefill→generating→idle cycle, spec 7.0x when counters advanced)
 - [x] Model-lifecycle gating: `/v1/models` status poll gates slot/metrics polling; verified live Chat model `· unloaded → · loading → prefill → idle` and that `/slots` returns 500 for a non-loaded model
 - [x] Docs + validate + commit (this file)
+- [x] Packaged as a pi package (repo-root `package.json` + `src/` layout, matching `pi-llama-cpp`); `pi config -l` shows `.. → [x] src/index.ts`
 
 ## Known limitations
 

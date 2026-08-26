@@ -1,5 +1,5 @@
 // stats.test.ts — assert-based checks for the pure stats core.
-// Run: node --experimental-strip-types .pi/extensions/llama-stats/stats.test.ts
+// Run: npm test
 import assert from "node:assert/strict";
 
 import {
@@ -13,7 +13,7 @@ import {
 	reset,
 	specAcceptance,
 	updateSpec,
-} from "./stats.ts";
+} from "../src/stats.ts";
 
 const slot = (o: Partial<SlotView> & { id: number }): SlotView => ({
 	isProcessing: true,

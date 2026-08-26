@@ -29,3 +29,12 @@ Built the llama-stats footer extension (change `llama-footer-stats`) from scratc
 ### Blockers
 
 - None. (Initial live checks evicted the Coder model's KV cache because the router is single-request; fixed by running load-generating checks against the Chat model.)
+
+### Packaging (restructure, same day)
+
+- User: the `.pi/extensions/llama-stats/` layout is wrong for distribution — pointed at `gsanhueza/pi-llama-cpp` as the reference. That repo is a publishable pi package: root `package.json` with a `pi` manifest (`pi.extensions`), source in `src/`, tests in `tests/`.
+- Restructured to match: `git mv` → `src/{index,stats}.ts` + `tests/stats.test.ts`; added `package.json` (pi manifest + `pi-package` keyword, jiti devDep, `npm test`), `tsconfig.json` (mirrors the reference; `allowImportingTsExtensions` for the `.ts` import specifiers), `README.md` (install/usage/dev).
+- Local wiring: `pi install -l --approve .` registers the repo root as a project package (`..` in `.pi/settings.json`, gitignored) — the project now consumes its own package the same way any user would; `pi config -l` shows `.. → [x] src/index.ts`.
+- `node --experimental-strip-types` does not work in this sandbox's node build (`ERR_NO_TYPESCRIPT`, not compiled with TS support) — tests run through jiti (`npm test`).
+- Verified: `npm test` passes, strict tsc clean against real pi types (via a throwaway /tmp tsconfig with a `paths` override — the committed tsconfig mirrors the reference, which relies on pi injecting its own modules into `node_modules` at install time), `openspec validate` still valid.
+- Pushed to `Faszakasza/llama-status-extension`. No extension code changed.

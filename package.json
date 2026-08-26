@@ -1,0 +1,28 @@
+{
+  "name": "llama-status-extension",
+  "version": "0.1.0",
+  "description": "Pi extension: footer line with live stats (tg3s, pf3s + bar, KV cache reuse, spec decoding acceptance) for the active llama.cpp/llama-server model",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "llama.cpp",
+    "llama-server"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "jiti tests/stats.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Faszakasza/llama-status-extension.git"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "devDependencies": {
+    "jiti": "^2.7.0"
+  }
+}

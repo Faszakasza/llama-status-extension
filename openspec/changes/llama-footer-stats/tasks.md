@@ -23,3 +23,4 @@
 
 - [x] 4.1 Write/update `/docs` per AGENTS.md (PLAN.md with design + status, CHANGES.md entry, PROGRESS.md session history) and verify the files exist and reflect the implemented behavior
 - [x] 4.2 Run `openspec validate llama-footer-stats` and commit the implementation, and verify the change validates and `git log` shows the milestone commit
+- [x] 4.3 Repackage as a publishable pi package per the `pi-llama-cpp` layout — repo-root `package.json` with pi manifest (`pi.extensions: ["./src/index.ts"]`), source moved to `src/`, tests to `tests/`, `tsconfig.json` + `README.md` added — and verify `pi install -l .` + `pi config -l` list the extension as enabled, `npm test` passes, and strict tsc is clean

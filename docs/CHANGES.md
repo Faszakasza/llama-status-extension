@@ -1,5 +1,13 @@
 # CHANGES
 
+## 2026-08-26 — pi package layout (restructure)
+
+- Restructured the repo into a publishable pi package (same layout as `gsanhueza/pi-llama-cpp`): `package.json` with a `pi` manifest (`pi.extensions: ["./src/index.ts"]`, `pi-package` keyword), source in `src/`, tests in `tests/`, `tsconfig.json`, `README.md`.
+- Moved `.pi/extensions/llama-stats/{index,stats,stats.test}.ts` → `src/{index,stats}.ts` + `tests/stats.test.ts`; fixed the test import path and run command (`npm test`, jiti dev-only runner — this node build lacks `--experimental-strip-types`).
+- `.gitignore` reverted to plain `.pi/` (no un-ignore exception needed anymore).
+- Local dev now consumes the package like any user: `pi install -l --approve .` (repo root registered as a project package in `.pi/settings.json`, gitignored). `pi config -l` shows `.. → [x] src/index.ts`.
+- No code changes to the extension itself; tests + strict tsc re-verified against the new layout.
+
 ## 2026-08-26 — llama-stats footer extension (change `llama-footer-stats`)
 
 - Added `.pi/extensions/llama-stats/` — a pi extension that renders live llama.cpp stats in the footer while the active model is a `llama-server` provider.

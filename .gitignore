@@ -1,5 +1,3 @@
-# ignore pi-managed dirs, but keep the extension source
-.pi/*
-!/.pi/extensions/
+.pi/
 __pycache__/
 node_modules/
