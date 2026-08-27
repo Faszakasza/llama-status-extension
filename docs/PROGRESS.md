@@ -26,6 +26,10 @@ Implemented change `sse-tap-stats`: replaced the 500 ms `/slots` polling with an
 ### Blockers
 
 - None. `pi-llama-cpp-stats` stays installed in this environment; the two `fetch` patches chain and its working-message bar is now a redundant subset (documented, not uninstalled — user's call).
+### Archive (same day)
+
+- Synced the delta into the main spec `openspec/specs/llama-stats-footer/spec.md` (1 added: Concurrent stream handling; 7 modified around the tap; 1 removed: Busiest slot selection). `openspec validate --specs` passes.
+- Moved the change to `openspec/changes/archive/2026-08-27-sse-tap-stats/`. No active openspec changes remain; no code touched by the archive.
 
 ## Session 2026-08-26
 

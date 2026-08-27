@@ -54,6 +54,7 @@ Deliberately excluded: session token-usage/cost (another extension owns it), any
 - [x] Docs + validate + commit (this file)
 - [x] Packaged as a pi package (repo-root `package.json` + `src/` layout, matching `pi-llama-cpp`); `pi config -l` shows `.. → [x] src/index.ts`
 - [x] SSE tap (openspec change `sse-tap-stats`): in-turn stats from the tapped `/chat/completions` stream; `/slots` polling deleted; `/metrics` gated on stream-generating; latest-wins stream tracking; final `timings` recorded as the turn's last sample; live-verified on aurora (full turn on the Chat model, spec figure when counters advanced, subagent concurrency, mid-turn model switch, lifecycle, non-llama clear, zero `/slots` requests)
+- [x] `sse-tap-stats` archived (2026-08-27): delta synced to the main spec (1 added / 7 modified / 1 removed), change moved to `openspec/changes/archive/2026-08-27-sse-tap-stats/`
 
 ## Known limitations
 

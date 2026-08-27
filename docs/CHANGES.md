@@ -1,4 +1,8 @@
 # CHANGES
+## 2026-08-27 — Archived `sse-tap-stats`, synced main spec
+
+- Synced the delta into `openspec/specs/llama-stats-footer/spec.md`: added `Concurrent stream handling`, rewrote the 7 modified requirements around the SSE tap (lifecycle, idle, prefill, generation, window speeds, KV-cache ratio, model lifecycle), removed `Busiest slot selection` (no `/slots` polling). `openspec validate --specs` passes.
+- Moved the change to `openspec/changes/archive/2026-08-27-sse-tap-stats/`. No active changes remain.
 
 ## 2026-08-27 — SSE stream tap replaces /slots polling (change `sse-tap-stats`)
 
