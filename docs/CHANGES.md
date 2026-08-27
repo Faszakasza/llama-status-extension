@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-08-27 — Fix: empty footer on resumed/new/forked sessions
+
+- Root cause: `src/index.ts` applied the active model only on `session_start` with `reason === "startup"`. Pi emits `session_start` with `reason: "resume"` (session resume/switch), `"new"` (`/new`), `"fork"`, or `"reload"`, and on those paths the model is restored at runtime construction **without** a `model_select` event (`model_select` fires only on user-driven `setModel`/`cycleModel`). So in any non-fresh-startup session the extension never targeted the router: no tap, no lifecycle poll, no status line — while unrelated extensions (pi-lens, ponytail) kept rendering in the powerline footer, which made it look like a powerline conflict (it was not: powerline's `extension_statuses` segment renders whatever `ui.setStatus` keys exist).
+- Fix (one line): `session_start` now calls `applyModel(ctx)` for every reason (it is idempotent — `start()` re-runs `stop()` first; `resolveSeparator` re-reads settings). Reproduced before/after with a mock-`pi` harness: `resume`/`new`/`fork`/`reload` went from 0 `setStatus` calls to the full six-field idle line.
+- Also: `injectFlags` typed as `injectFlags<T>(body: T): T | string` (pass-through at its boundary) instead of `unknown`, dropping the now-unneeded `as BodyInit` cast.
+- `npm test` green (stats + tap), strict tsc clean.
+
 ## 2026-08-27 — Per-turn draft figures from final-chunk timings; `/metrics` removed (change `draft-acceptance-mean-len`)
 
 - Root cause of the permanently-`-` `draft` field: the spec figure was computed from deltas of the Prometheus spec counters polled from `/metrics` every 2 s while generating, but llama.cpp merges per-slot spec stats into those counters only when a task completes (`metrics_on_prediction`) — during a turn the counters are frozen, so every in-turn delta was 0. The counters are also server-cumulative, the wrong basis for a per-turn figure.

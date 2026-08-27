@@ -111,7 +111,7 @@ export default function (pi: ExtensionAPI) {
 		return url.startsWith(target.baseUrl) && url.includes("/chat/completions");
 	}
 
-	function injectFlags(body: unknown): unknown {
+	function injectFlags<T>(body: T): T | string {
 		if (typeof body !== "string") return body; // non-string body: pass through
 		let p: Record<string, unknown>;
 		try {
@@ -220,7 +220,7 @@ export default function (pi: ExtensionAPI) {
 		const body = injectFlags(init?.body);
 		const res = await orig(
 			input,
-			body === init?.body ? init : { ...init, body: body as BodyInit },
+			body === init?.body ? init : { ...init, body: body },
 		);
 
 		const isSse = (res.headers.get("content-type") ?? "").includes(
@@ -327,9 +327,11 @@ export default function (pi: ExtensionAPI) {
 		return null;
 	}
 
-	pi.on("session_start", (event, ctx) => {
+	// Every reason (startup/resume/new/fork/reload) re-emits session_start with
+	// the model already set and no model_select event, so always (re-)apply.
+	pi.on("session_start", (_event, ctx) => {
 		resolveSeparator(ctx.cwd, ctx.isProjectTrusted());
-		if (event.reason === "startup") applyModel(ctx);
+		applyModel(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => {
 		applyModel(ctx);

@@ -1,5 +1,30 @@
 # PROGRESS
 
+## Session 2026-08-27 (4)
+
+Fixed the empty-footer bug reported live ("extension is not showing anything in the footer; maybe a conflict with the powerline footer extension?").
+
+### Diagnosis
+
+- Not a powerline conflict: other extensions' statuses (pi-lens, ponytail) render inside powerline's `extension_statuses` segment, which joins whatever keys `ui.setStatus` holds — the pipeline was healthy, llama-stats simply never set its key.
+- Traced pi's runtime (bundled chunk): `session_start` is emitted during runtime construction with `reason: "startup"` only for the initial runtime; `switchSession`/resume → `"resume"`, `/new` → `"new"`, fork → `"fork"`, plus `"reload"`. The model is restored into agent state at construction on all of these paths **without** emitting `model_select` (`_emitModelSelect` is called only from `setModel`/`cycleModel`, and only when the model actually changes).
+- `src/index.ts` gated on `event.reason === "startup"` → in any resumed/new/forked session `target` stayed null: no fetch tap, no 2 s lifecycle poll, no `ui.setStatus` ever. Fresh sessions worked, which is why every earlier live test passed.
+- Reproduced with a mock-`pi` harness (jiti + captured `setStatus`): `startup` → 3 status calls, `resume`/`new`/`fork`/`reload` → 0. After the fix, all five reasons produce the full six-field idle line (router polled live).
+- Ruled out along the way: hollow `node_modules` in the installed git clone (pi's bundled loader serves `@earendil-works/pi-coding-agent` via `VIRTUAL_MODULES`, so it's harmless), and `ctx.isProjectTrusted` missing (it exists in pi 0.84.3).
+
+### Fix
+
+- `src/index.ts`: `session_start` now calls `applyModel(ctx)` for every reason (idempotent: `start()` re-runs `stop()` first). `model_select` unchanged for mid-session switches. `injectFlags` retyped `<T>(body: T): T | string` (lens blocker), dropped the `as BodyInit` cast.
+- Docs: CHANGES entry, PLAN "Active model" line updated.
+
+### Verification
+
+- `npm test` green, strict tsc clean, mock harness all reasons green.
+
+### Blockers
+
+- None. Activation for the running TUI: commit + push, `git pull` in the installed clone `~/.pi/agent/git/github.com/Faszakasza/llama-status-extension`, then `/reload`.
+
 ## Session 2026-08-27 (3)
 
 Implemented change `draft-acceptance-mean-len`: per-turn draft figures from final-chunk timings, persistent draft state with empirical support detection, `/metrics` removed, 500 ms min-span floor for the speed windows.
@@ -81,6 +106,7 @@ Implemented change `sse-tap-stats`: replaced the 500 ms `/slots` polling with an
 ### Blockers
 
 - None. `pi-llama-cpp-stats` stays installed in this environment; the two `fetch` patches chain and its working-message bar is now a redundant subset (documented, not uninstalled — user's call).
+
 ### Archive (same day)
 
 - Synced the delta into the main spec `openspec/specs/llama-stats-footer/spec.md` (1 added: Concurrent stream handling; 7 modified around the tap; 1 removed: Busiest slot selection). `openspec validate --specs` passes.
