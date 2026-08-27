@@ -88,7 +88,6 @@ export default function (pi: ExtensionAPI) {
 	let auxTimer: ReturnType<typeof setInterval> | null = null;
 	let originalFetch: typeof fetch | null = null;
 
-
 	function render(v: RenderView | string): void {
 		if (!ui || !target) return;
 		ui.setStatus(
@@ -252,14 +251,25 @@ export default function (pi: ExtensionAPI) {
 			if (tracker.activeId) return; // a turn is live: don't overwrite the phase line
 			if (value === "loaded") renderIdle();
 			else if (value === "loading" || value === "unloaded")
-				render(renderLine(target.model, { phase: value, draft: state.draft } satisfies RenderView, separator));
+				render(
+					renderLine(
+						target.model,
+						{ phase: value, draft: state.draft } satisfies RenderView,
+						separator,
+					),
+				);
 			else render(`${target.model} · ${value}`); // failed/sleeping/etc
 		} catch {
 			if (tracker.activeId) return; // a live stream is the ground truth
-			render(renderLine(target.model, { phase: "offline", draft: state.draft } satisfies RenderView, separator));
+			render(
+				renderLine(
+					target.model,
+					{ phase: "offline", draft: state.draft } satisfies RenderView,
+					separator,
+				),
+			);
 		}
 	}
-
 
 	// ─── lifecycle ────────────────────────────────────────────────────────────
 

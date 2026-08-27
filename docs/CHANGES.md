@@ -28,6 +28,7 @@
 - Tests: `stats.test.ts` re-pointed to the six-field format (plus custom-separator and null `spec`/`cachePct` cases); `tap.test.ts` exact lines updated + separator case (trusted temp project dir; hermetic global settings dir via `PI_CODING_AGENT_DIR`); `tests/live.ts` asserts six fields on every line and the non-llama clear. `npm test` green, strict tsc clean.
 - Live (aurora, Chat model Qwen3.6-35B-A3B): one full prefill→generating→idle turn, every footer line uniformly six-field, non-llama model clears the status, zero `/slots` requests.
 - `README.md`: examples replaced (verified byte-for-byte against `renderLine` output) and the `separator` setting documented (location, precedence, default, lifetime).
+
 ## 2026-08-27 — Archived `sse-tap-stats`, synced main spec
 
 - Synced the delta into `openspec/specs/llama-stats-footer/spec.md`: added `Concurrent stream handling`, rewrote the 7 modified requirements around the SSE tap (lifecycle, idle, prefill, generation, window speeds, KV-cache ratio, model lifecycle), removed `Busiest slot selection` (no `/slots` polling). `openspec validate --specs` passes.
