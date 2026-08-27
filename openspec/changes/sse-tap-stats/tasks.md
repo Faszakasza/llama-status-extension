@@ -30,4 +30,4 @@
 ## 6. Docs + closeout
 
 - [x] 6.1 Update README (stats sourcing, load numbers, note on coexisting with pi-llama-cpp-stats), PLAN.md, CHANGES.md, PROGRESS.md — verify: files describe the SSE tap, not polling.
-- [ ] 6.2 `openspec validate --change sse-tap-stats` and commit — verify: validate passes, commit pushed.
+- [x] 6.2 `openspec validate --change sse-tap-stats` and commit — verify: validate passes, commit pushed.
