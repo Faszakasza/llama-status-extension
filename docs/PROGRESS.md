@@ -25,6 +25,12 @@ Fixed the empty-footer bug reported live ("extension is not showing anything in 
 
 - None. Activation for the running TUI: commit + push, `git pull` in the installed clone `~/.pi/agent/git/github.com/Faszakasza/llama-status-extension`, then `/reload`.
 
+### Archive (same day)
+
+- Retroactive OpenSpec change `session-start-model-activation` (proposal/specs delta/design/tasks, all tasks already done) created, `openspec validate --strict` valid, committed `a6042a8`.
+- Delta synced into the main spec `openspec/specs/llama-stats-footer/spec.md` (MODIFIED: `Footer status line lifecycle` — every-`session_start`-reason activation + idempotency, 2 scenarios added: resumed/replaced session restores the footer, re-applying the same model does not leak). Verified: requirement text identical to the delta block, 6/6 scenarios, `openspec validate --specs` passes.
+- Change moved to `openspec/changes/archive/2026-08-27-session-start-model-activation/`. No active openspec changes remain; no code touched by the archive.
+
 ## Session 2026-08-27 (3)
 
 Implemented change `draft-acceptance-mean-len`: per-turn draft figures from final-chunk timings, persistent draft state with empirical support detection, `/metrics` removed, 500 ms min-span floor for the speed windows.
