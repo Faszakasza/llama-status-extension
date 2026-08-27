@@ -37,9 +37,7 @@ let nextStreamId = "c1";
 
 // final chunk carries draft_n/draft_n_accepted iff `draft` is [n, accepted, predictedN]
 const sseFor = (id: string, draft: [number, number, number] | null): string => {
-	const f = draft
-		? `,"draft_n":${draft[0]},"draft_n_accepted":${draft[1]}`
-		: "";
+	const f = draft ? `,"draft_n":${draft[0]},"draft_n_accepted":${draft[1]}` : "";
 	return [
 		`data: {"id":"${id}","prompt_progress":{"total":100,"processed":40,"cache":20,"time_ms":400}}\n\n`,
 		`data: {"id":"${id}","prompt_progress":{"total":100,"processed":100,"cache":20,"time_ms":1000}}\n\n`,
@@ -56,13 +54,10 @@ const fakeTransport = async (
 	requested.push({ url: input, body: init?.body });
 	if (failModels && input.includes("/v1/models")) throw new Error("down");
 	if (input.includes("/chat/completions"))
-		return new Response(
-			new Blob([sseFor(nextStreamId, currentDraft)]),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
+		return new Response(new Blob([sseFor(nextStreamId, currentDraft)]), {
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
 	return Response.json({ data: [] });
 };
 let currentDraft: [number, number, number] | null = null;
@@ -86,7 +81,11 @@ async function main() {
 	currentDraft = [8, 6, 11]; // → 75% 2.2x
 	const res = await tapped("http://fake.local:9/chat/completions", { body });
 	const text = await res.text();
-	assert.equal(text, sseFor("c1", [8, 6, 11]), "original SSE bytes re-emitted unchanged");
+	assert.equal(
+		text,
+		sseFor("c1", [8, 6, 11]),
+		"original SSE bytes re-emitted unchanged",
+	);
 
 	const chat = requested.find(
 		(r) => r.url === "http://fake.local:9/chat/completions",
@@ -200,13 +199,10 @@ async function main() {
 	rmSync(sepDir, { recursive: true, force: true });
 
 	// ── model switch: draft state resets to - ──
-	handlers.model_select(
-		undefined,
-		{
-			...ctx,
-			model: { id: "m2", provider: "llama-server=http://fake.local:9" },
-		},
-	);
+	handlers.model_select(undefined, {
+		...ctx,
+		model: { id: "m2", provider: "llama-server=http://fake.local:9" },
+	});
 	await tick();
 	assert.equal(
 		lines()[lines().length - 1],

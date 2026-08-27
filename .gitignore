@@ -1,4 +1,3 @@
 .pi/
 __pycache__/
 node_modules/
-tsconfig.check.json
