@@ -1,7 +1,6 @@
 // llama-stats — footer stats for the active llama.cpp model.
 // In-turn stats come from a tap on the chat-completion SSE stream (zero extra
-// requests); only the lifecycle status (/v1/models) and spec metrics
-// (/metrics) are still polled, and /metrics only while a turn is generating.
+// requests); only the lifecycle status (/v1/models) is polled.
 // Pure logic lives in stats.ts.
 import {
 	CONFIG_DIR_NAME,
@@ -25,7 +24,7 @@ import {
 	parseChunk,
 	renderLine,
 	reset,
-	updateSpec,
+	resetTurn,
 } from "./stats.ts";
 
 const AUX_MS = 2000;
@@ -89,11 +88,6 @@ export default function (pi: ExtensionAPI) {
 	let auxTimer: ReturnType<typeof setInterval> | null = null;
 	let originalFetch: typeof fetch | null = null;
 
-	function parseMetric(text: string, name: string): number | null {
-		const re = new RegExp(`^${name}\\s+(\\d+(?:\\.\\d+)?)$`, "m");
-		const m = re.exec(text);
-		return m ? Number(m[1]) : null;
-	}
 
 	function render(v: RenderView | string): void {
 		if (!ui || !target) return;
@@ -104,7 +98,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function renderIdle(): void {
-		render({ phase: "idle" });
+		render({ phase: "idle", draft: state.draft });
 	}
 
 	// ─── SSE tap ──────────────────────────────────────────────────────────────
@@ -161,7 +155,7 @@ export default function (pi: ExtensionAPI) {
 			const c = classify(tracker, id);
 			if (c === "new") {
 				openStream(tracker, id);
-				reset(state); // supersede: fresh windows for the new stream
+				resetTurn(state); // supersede: fresh windows, draft state kept (model-level)
 			} else if (c === "stale") {
 				return; // late events from a superseded stream
 			}
@@ -241,7 +235,7 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
-	// ─── polling (lifecycle + spec only) ──────────────────────────────────────
+	// ─── polling (lifecycle only) ──────────────────────────────────────────────
 
 	async function pollStatus(): Promise<void> {
 		if (!target) return;
@@ -258,39 +252,14 @@ export default function (pi: ExtensionAPI) {
 			if (tracker.activeId) return; // a turn is live: don't overwrite the phase line
 			if (value === "loaded") renderIdle();
 			else if (value === "loading" || value === "unloaded")
-				render(renderLine(target.model, { phase: value } satisfies RenderView, separator));
+				render(renderLine(target.model, { phase: value, draft: state.draft } satisfies RenderView, separator));
 			else render(`${target.model} · ${value}`); // failed/sleeping/etc
 		} catch {
 			if (tracker.activeId) return; // a live stream is the ground truth
-			render(renderLine(target.model, { phase: "offline" } satisfies RenderView, separator));
+			render(renderLine(target.model, { phase: "offline", draft: state.draft } satisfies RenderView, separator));
 		}
 	}
 
-	async function pollMetrics(): Promise<void> {
-		// spec polling only while a turn is actively generating
-		if (!target || !tracker.activeId || state.turn?.phase !== "generating")
-			return;
-		try {
-			const res = await globalThis.fetch(
-				`${target.baseUrl}/metrics?model=${encodeURIComponent(target.model)}`,
-				{ signal: AbortSignal.timeout(3000) },
-			);
-			if (!res.ok) return;
-			const text = await res.text();
-			const draftSteps = parseMetric(
-				text,
-				"llamacpp:spec_decode_num_drafts_total",
-			);
-			const accepted = parseMetric(
-				text,
-				"llamacpp:spec_decode_num_accepted_tokens_total",
-			);
-			if (draftSteps != null && accepted != null)
-				updateSpec(state, { draftSteps, accepted });
-		} catch {
-			// keep the last spec value; next poll refreshes it
-		}
-	}
 
 	// ─── lifecycle ────────────────────────────────────────────────────────────
 
@@ -310,18 +279,19 @@ export default function (pi: ExtensionAPI) {
 		if (auxTimer) clearInterval(auxTimer);
 		auxTimer = null;
 		target = null;
-		reset(state);
 		removeTap();
 		ui?.setStatus(STATUS_KEY, undefined);
 	}
 
 	function start(t: Target): void {
+		// the draft state is model-level: reset only when the model changes
+		const switching = !target || target.model !== t.model;
 		stop();
+		if (switching) reset(state);
 		target = t;
 		installTap();
 		auxTimer = setInterval(() => {
 			void pollStatus();
-			void pollMetrics();
 		}, AUX_MS);
 		void pollStatus();
 	}

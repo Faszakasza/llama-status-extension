@@ -13,13 +13,14 @@ import {
 	onProgress,
 	onStreamEnd,
 	onToken,
+	onTurnEnd,
 	applyEvent,
 	openStream,
 	parseChunk,
 	renderLine,
 	reset,
-	specAcceptance,
-	updateSpec,
+	type DraftState,
+	type TurnTimings,
 } from "../src/stats.ts";
 
 const tokens = (s: StatsState, times: number[]): RenderView => {
@@ -142,6 +143,8 @@ const tokens = (s: StatsState, times: number[]): RenderView => {
 		completionN: 1,
 		predictedMs: 0,
 		predictedPerSecond: 0,
+		draftN: null,
+		draftNAccepted: null,
 	});
 	assert.ok(
 		Math.abs((v.pf ?? 0) - 100) < 0.5,
@@ -152,57 +155,192 @@ const tokens = (s: StatsState, times: number[]): RenderView => {
 // --- timings cross-check with KV cache reuse (prompt_n excludes cached) ------
 {
 	const s = createState();
-	onProgress(s, { total: 59, processed: 55, cache: 55, timeMs: 32 });
-	onProgress(s, { total: 59, processed: 59, cache: 55, timeMs: 161 });
+	onProgress(s, { total: 59, processed: 55, cache: 55, timeMs: 320 });
+	onProgress(s, { total: 59, processed: 59, cache: 55, timeMs: 1610 });
 	// server: 4 non-cached + 55 cached; prompt_n is non-cached only
 	const v = onStreamEnd(s, {
 		promptN: 4,
 		cacheN: 55,
-		promptMs: 162.5,
-		promptPerSecond: 24.6,
+		promptMs: 1625,
+		promptPerSecond: 2.46,
 		completionN: 64,
 		predictedMs: 2754,
 		predictedPerSecond: 22.9,
+		draftN: null,
+		draftNAccepted: null,
 	});
 	// final sample must be total (59), not prompt_n (4), or the window goes negative
-	assert.ok((v.pf ?? 0) > 10, `cached cross-check pf (${v.pf}) stays positive`);
+	assert.ok((v.pf ?? 0) > 1, `cached cross-check pf (${v.pf}) stays positive`);
 	assert.ok(
-		Math.abs((v.pf ?? 0) - 24.6) < 20,
-		`pf (${v.pf}) within margin of server 24.6`,
+		Math.abs((v.pf ?? 0) - 2.46) < 20,
+		`pf (${v.pf}) within margin of server 2.46`,
 	);
 }
 
-// --- spec acceptance -----------------------------------------------------------
+// --- draft state machine + formulas (1.3) --------------------------------------
 {
+	const T = (o: Partial<TurnTimings>): TurnTimings => ({
+		promptN: 0,
+		cacheN: 0,
+		promptMs: 0,
+		promptPerSecond: 0,
+		completionN: 0,
+		predictedMs: 0,
+		predictedPerSecond: 0,
+		draftN: null,
+		draftNAccepted: null,
+		...o,
+	});
+
+	// live case: predicted 48, draft 40, accepted 33 → 83% 3.2x
+	const s1 = createState();
+	onTurnEnd(s1, T({ completionN: 48, draftN: 40, draftNAccepted: 33 }));
+	assert.deepEqual(s1.draft, { kind: "value", ratioPct: 83, meanLen: 3.2 });
+
+	// log-line case: 811 generated drafts, 349 accepted, 538 predicted
+	// → ratio 43%, steps 189, mean len 1+349/189 = 2.85 → 2.9x
+	const s2 = createState();
+	onTurnEnd(s2, T({ completionN: 538, draftN: 811, draftNAccepted: 349 }));
+	assert.deepEqual(s2.draft, { kind: "value", ratioPct: 43, meanLen: 2.9 });
+
+	// accepted = 0 → 0% 1.0x
+	const s3 = createState();
+	onTurnEnd(s3, T({ completionN: 10, draftN: 10, draftNAccepted: 0 }));
+	assert.deepEqual(s3.draft, { kind: "value", ratioPct: 0, meanLen: 1.0 });
+
+	// absent fields (older build) with generated tokens → unsupported verdict
+	const s4 = createState();
+	onTurnEnd(s4, T({ completionN: 5 }));
+	assert.equal(s4.draft.kind, "unsupported");
+	// absent fields, no generated tokens → stays none
+	const s4b = createState();
+	onTurnEnd(s4b, T({ completionN: 0 }));
+	assert.equal(s4b.draft.kind, "none");
+
+	// no stats after a value: keep the value
+	onTurnEnd(s2, T({ completionN: 7 }));
+	assert.deepEqual(s2.draft, { kind: "value", ratioPct: 43, meanLen: 2.9 });
+
+	// unsupported is never latched: stats self-heal back to a value
+	onTurnEnd(s4, T({ completionN: 12, draftN: 8, draftNAccepted: 6 }));
+	assert.deepEqual(s4.draft, { kind: "value", ratioPct: 75, meanLen: 2.0 });
+
+	// value updates with each new turn
+	onTurnEnd(s2, T({ completionN: 11, draftN: 8, draftNAccepted: 6 }));
+	assert.deepEqual(s2.draft, { kind: "value", ratioPct: 75, meanLen: 2.2 });
+
+	// unsupported verdict persists across stats-less turns
+	const s5 = createState();
+	onTurnEnd(s5, T({ completionN: 3 }));
+	onTurnEnd(s5, T({ completionN: 4 }));
+	assert.equal(s5.draft.kind, "unsupported");
+
+	// no timings at all (aborted / no usage chunk) → no verdict
+	const s6 = createState();
+	onTurnEnd(s6, null);
+	assert.equal(s6.draft.kind, "none");
+
+	// draftN present but degenerate steps → keep previous state
+	const s7 = createState();
+	onTurnEnd(s7, T({ completionN: 48, draftN: 40, draftNAccepted: 33 }));
+	onTurnEnd(s7, T({ completionN: 5, draftN: 9, draftNAccepted: 9 }));
+	assert.deepEqual(s7.draft, { kind: "value", ratioPct: 83, meanLen: 3.2 });
+
+	// state flows into the render view in every phase
+	const s8 = createState();
+	onTurnEnd(s8, T({ completionN: 11, draftN: 8, draftNAccepted: 6 }));
+	const v8 = onProgress(s8, { total: 10, processed: 10, cache: 0, timeMs: 0 });
+	assert.equal(v8.draft?.kind, "value", "value visible during a new turn's prefill");
+	assert.equal(renderLine("M", v8).endsWith("draft 75% 2.2x"), true);
+
+	// unsupported renders as literal text
+	const unsup: RenderView = { phase: "idle", draft: { kind: "unsupported" } };
 	assert.equal(
-		specAcceptance(null, { draftSteps: 10, accepted: 9 }),
-		null,
-		"no prev sample",
+		renderLine("M", unsup),
+		"M · idle · pf - · tg3s - · cache - · draft not supported",
 	);
-	assert.equal(
-		specAcceptance(
-			{ draftSteps: 10, accepted: 9 },
-			{ draftSteps: 10, accepted: 9 },
-		),
-		null,
-		"no draft activity",
-	);
-	assert.equal(
-		specAcceptance(
-			{ draftSteps: 100, accepted: 0 },
-			{ draftSteps: 200, accepted: 90 },
-		),
-		1.9,
-		"1+90/100=1.9",
-	);
+}
+
+// --- min-span floor for speed() (1.2) ------------------------------------------
+{
+	// turn-start burst: 4 tokens within 2 ms, then steady 66 ms/token (~15 t/s)
 	const s = createState();
-	updateSpec(s, { draftSteps: 0, accepted: 0 });
-	updateSpec(s, { draftSteps: 100, accepted: 890 });
-	onProgress(s, { total: 100, processed: 100, cache: 0, timeMs: 0 });
-	const v = onToken(s, 500);
-	assert.equal(v.spec, 9.9, "1+890/100=9.9");
-	const v2 = onToken(s, 1000);
-	assert.equal(v2.spec, 9.9, "spec persists between metrics polls");
+	let maxSeen = 0;
+	for (const t of [0, 1, 1, 2]) {
+		maxSeen = Math.max(maxSeen, (onToken(s, t).tg ?? 0));
+	}
+	for (let t = 50; t <= 2000; t += 66) {
+		const v = onToken(s, t);
+		if (t <= 2000) maxSeen = Math.max(maxSeen, v.tg ?? 0);
+	}
+	assert.ok(
+		maxSeen <= 100,
+		`burst never exceeds 100/s during the first 2 s, got ${maxSeen}`,
+	);
+
+	// 3 tokens over 400 ms: below the 500 ms floor → 0/s throughout
+	const s2 = createState();
+	const short = [onToken(s2, 0), onToken(s2, 150), onToken(s2, 400)];
+	for (const v of short) assert.equal(v.tg ?? 0, 0, "span < 500 ms → 0/s");
+
+	// full window unchanged: 40 tokens over 2 s → 20 t/s
+	const s3 = createState();
+	const v3 = tokens(s3, Array.from({ length: 41 }, (_, i) => 1000 + i * 50));
+	assert.ok(
+		Math.abs((v3.tg ?? 0) - 20) < 0.5,
+		`full window tg≈20, got ${v3.tg}`,
+	);
+}
+
+// --- parseChunk draft fields (1.1) ---------------------------------------------
+{
+	const u = parseChunk(
+		"{\"usage\":{\"prompt_tokens\":3},\"timings\":{\"predicted_n\":11,\"draft_n\":8,\"draft_n_accepted\":6}}",
+	);
+	assert.equal(u?.kind, "usage");
+	assert.equal(u?.timings?.draftN, 8);
+	assert.equal(u?.timings?.draftNAccepted, 6);
+
+	const bare = parseChunk(
+		'{"usage":{"prompt_tokens":3},"timings":{"predicted_n":11,"prompt_ms":5,"predicted_ms":30}}',
+	);
+	assert.equal(bare?.kind, "usage");
+	assert.equal(bare?.timings?.draftN, null, "absent → null (older build)");
+	assert.equal(bare?.timings?.draftNAccepted, null);
+}
+
+// --- draft rendering per phase (1.4) -------------------------------------------
+{
+	const R = (o: Partial<RenderView> & { phase: RenderView["phase"] }): RenderView => o;
+	const val: DraftState = { kind: "value", ratioPct: 43, meanLen: 2.9 };
+	for (const phase of [
+		"idle",
+		"prefill",
+		"generating",
+		"loading",
+		"unloaded",
+		"offline",
+	] as const) {
+		const line = renderLine("M", R({ phase, draft: val }));
+		assert.ok(
+			line.endsWith("draft 43% 2.9x"),
+			`draft value shown in ${phase} phase: ${line}`,
+		);
+	}
+	assert.equal(
+		renderLine("M", R({ phase: "idle", draft: { kind: "unsupported" } })),
+		"M · idle · pf - · tg3s - · cache - · draft not supported",
+	);
+	assert.equal(
+		renderLine("M", R({ phase: "generating", tg: 15, draft: val })),
+		"M · active · pf - · tg3s 15/s · cache - · draft 43% 2.9x",
+	);
+
+	// reset clears the draft state
+	const s = createState();
+	onTurnEnd(s, { promptN: 0, cacheN: 0, promptMs: 0, promptPerSecond: 0, completionN: 11, predictedMs: 0, predictedPerSecond: 0, draftN: 8, draftNAccepted: 6 });
+	reset(s);
+	assert.equal(s.draft.kind, "none");
 }
 
 // --- model switch / reset -------------------------------------------------------
@@ -213,7 +351,7 @@ const tokens = (s: StatsState, times: number[]): RenderView => {
 	reset(s);
 	const v = onProgress(s, { total: 100, processed: 0, cache: 0, timeMs: 0 });
 	assert.equal(v.pf, 0, "reset clears windows");
-	assert.equal(v.spec, null);
+	assert.equal(v.draft?.kind, "none", "reset clears the draft state");
 }
 
 // --- SSE chunk parsing ----------------------------------------------------------
@@ -325,12 +463,12 @@ const tokens = (s: StatsState, times: number[]): RenderView => {
 		renderLine("M", R({ phase: "prefill" })),
 		"M · active · pf 0/s ░░░░░░ 0% · tg3s - · cache - · draft -",
 	);
-	// generating: tg3s + spec
+	// generating: tg3s + draft value
 	assert.equal(
-		renderLine("M", R({ phase: "generating", tg: 78, spec: 1.9 })),
-		"M · active · pf - · tg3s 78/s · cache - · draft 1.9x",
+		renderLine("M", R({ phase: "generating", tg: 78, draft: { kind: "value", ratioPct: 43, meanLen: 2.9 } })),
+		"M · active · pf - · tg3s 78/s · cache - · draft 43% 2.9x",
 	);
-	// generating: null spec → draft dash
+	// generating: no draft state → draft dash
 	assert.equal(
 		renderLine("M", R({ phase: "generating", tg: 1234 })),
 		"M · active · pf - · tg3s 1.2k/s · cache - · draft -",

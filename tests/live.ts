@@ -86,17 +86,20 @@ async function main() {
 		`[live] requests: models=${count("/v1/models")} metrics=${count("/metrics")} chat=${count("/chat/completions")} slots=${count("/slots")}`,
 	);
 
-	const idleLine = `${MODEL} · idle · pf - · tg3s - · cache - · draft -`;
+	// after one real turn the idle line carries the per-turn draft figure
 	const hasPf = lines.some((l) => l.includes("active · pf "));
 	const hasTg = lines.some((l) => l.includes("active · pf - · tg3s "));
-	const idle = lines[lines.length - 1] === idleLine;
+	const draftFig = /^.+ · idle · pf - · tg3s - · cache - · draft \d+% \d+\.\dx$/.test(
+		lines[lines.length - 1],
+	);
 	const sixFields = lines.every(
 		(l) => l.split(" · ").length === 6,
 	);
+	const noMetrics = count("/metrics") === 0;
 	const ok =
-		hasPf && hasTg && idle && sixFields && cleared && count("/slots") === 0;
+		hasPf && hasTg && draftFig && sixFields && cleared && count("/slots") === 0 && noMetrics;
 	console.log(
-		`[live] prefill=${hasPf} generating=${hasTg} idle=${idle} sixFields=${sixFields} nonLlamaClear=${cleared} noSlots=${count("/slots") === 0}`,
+		`[live] prefill=${hasPf} generating=${hasTg} draftFigure=${draftFig} sixFields=${sixFields} nonLlamaClear=${cleared} noSlots=${count("/slots") === 0} noMetrics=${noMetrics}`,
 	);
 	console.log(ok ? "[live] PASS" : "[live] FAIL");
 	process.exit(ok ? 0 : 1);

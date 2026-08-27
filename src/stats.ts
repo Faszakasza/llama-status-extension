@@ -2,15 +2,10 @@
 // Type-checks and runs standalone under jiti/node.
 //
 // In-turn stats come from the tapped SSE stream: prompt_progress events,
-// per-token arrivals, and the final chunk's server `timings`. Only the
-// lifecycle status and spec-decoding metrics are still polled (in index.ts).
+// per-token arrivals, and the final chunk's server `timings` (which also
+// carry the per-turn draft spec-decoding stats). Only the lifecycle status is
+// polled (in index.ts).
 
-export interface SpecCounters {
-	/** spec_decode_num_drafts_total — verification steps (server-cumulative) */
-	draftSteps: number;
-	/** spec_decode_num_accepted_tokens_total (server-cumulative) */
-	accepted: number;
-}
 
 /** Per-turn server timings from the final SSE chunk (llama.cpp `timings`). */
 export interface TurnTimings {
@@ -28,7 +23,17 @@ export interface TurnTimings {
 	predictedMs: number;
 	/** server-computed generation rate (tokens/s) */
 	predictedPerSecond: number;
+	/** speculative draft tokens generated this turn (absent on older builds) */
+	draftN: number | null;
+	/** speculative draft tokens accepted this turn (absent on older builds) */
+	draftNAccepted: number | null;
 }
+
+/** Persistent draft field state: no verdict yet, last computed pair, or "not supported". */
+export type DraftState =
+	| { kind: "none" }
+	| { kind: "value"; ratioPct: number; meanLen: number }
+	| { kind: "unsupported" };
 
 export interface RenderView {
 	phase: "idle" | "prefill" | "generating" | "offline" | "loading" | "unloaded";
@@ -36,7 +41,7 @@ export interface RenderView {
 	pf?: number; // tokens/s, 3s sliding window
 	barFrac?: number; // 0..1 prefill progress
 	cachePct?: number | null; // 0..100
-	spec?: number | null; // e.g. 1.9
+	draft?: DraftState; // draft field state (defaults to none)
 }
 
 /** One window sample: cumulative value v at time t (ms). */
@@ -57,20 +62,27 @@ interface TurnState {
 
 export interface StatsState {
 	turn: TurnState | null;
-	specPrev: SpecCounters | null;
-	specValue: number | null;
+	draft: DraftState;
 }
 
 const WINDOW_MS = 3000;
+// Below this sample span the window would divide a small delta by a
+// millisecond span (turn-start MTP bursts); rendered 0/s via the null path.
+const MIN_SPAN_MS = 500;
 
 export function createState(): StatsState {
-	return { turn: null, specPrev: null, specValue: null };
+	return { turn: null, draft: { kind: "none" } };
 }
 
 export function reset(s: StatsState): void {
 	s.turn = null;
-	s.specPrev = null;
-	s.specValue = null;
+	s.draft = { kind: "none" };
+}
+
+/** Clear only the live turn windows (a stream is superseded). The model-level
+ * draft state is kept — it resets only on a model switch. */
+export function resetTurn(s: StatsState): void {
+	s.turn = null;
 }
 
 function ensureTurn(s: StatsState): TurnState {
@@ -105,7 +117,7 @@ function speed(samples: Sample[]): number | null {
 	}
 	if (oldest === cur) return null;
 	const dt = cur.t - oldest.t;
-	if (dt <= 0) return null;
+	if (dt < MIN_SPAN_MS) return null; // min-span floor: burst-safe 0/s
 	return Math.max(0, cur.v - oldest.v) / (dt / 1000);
 }
 
@@ -122,22 +134,6 @@ export function cachePct(cache: number, processed: number): number | null {
 	return Math.round((cache / total) * 100);
 }
 
-/** 1 + Δaccepted/Δverification-steps, or null when no draft activity. */
-export function specAcceptance(
-	prev: SpecCounters | null,
-	cur: SpecCounters,
-): number | null {
-	if (!prev) return null;
-	const dSteps = cur.draftSteps - prev.draftSteps;
-	if (dSteps <= 0) return null;
-	return 1 + (cur.accepted - prev.accepted) / dSteps;
-}
-
-/** Feed one /metrics sample; stores the spec value for the next render. */
-export function updateSpec(s: StatsState, cur: SpecCounters): void {
-	s.specValue = specAcceptance(s.specPrev, cur);
-	s.specPrev = cur;
-}
 
 function view(s: StatsState, turn: TurnState): RenderView {
 	const generating = turn.phase === "generating";
@@ -152,7 +148,7 @@ function view(s: StatsState, turn: TurnState): RenderView {
 		tg: speed(turn.tg) ?? 0,
 		barFrac,
 		cachePct: generating ? null : cachePct(turn.cache, turn.processed),
-		spec: s.specValue,
+		draft: s.draft,
 	};
 }
 
@@ -182,6 +178,34 @@ export function onToken(s: StatsState, now: number): RenderView {
 }
 
 /**
+ * Turn-end draft verdict from the final chunk's per-turn timings. The server
+ * emits the draft fields iff its spec counter path ran for the task, so their
+ * presence IS the support detection (no spec-type lists): stats present →
+ * value (update or self-heal from unsupported); no stats + generated tokens +
+ * no verdict yet → unsupported. `not supported` is never latched.
+ */
+export function onTurnEnd(s: StatsState, timings?: TurnTimings | null): void {
+	if (!timings) return; // aborted / no usage chunk: no verdict
+	if (timings.draftN != null && timings.draftN > 0) {
+		const accepted = timings.draftNAccepted ?? 0;
+		const steps = timings.completionN - accepted; // = verification steps
+		// ponytail: steps > 0 holds whenever this verdict applies; the guard
+		// only fires on malformed data (field keeps its previous state)
+		if (steps > 0)
+			s.draft = {
+				kind: "value",
+				ratioPct: Math.round((accepted / timings.draftN) * 100),
+				// double round: 2.8466 → 2.85 (llama.cpp's 2-dec stdout value) → 2.9x
+				meanLen:
+					Math.round(Math.round((1 + accepted / steps) * 100) / 10) / 10,
+			};
+		return;
+	}
+	if (timings.completionN >= 1 && s.draft.kind === "none")
+		s.draft = { kind: "unsupported" };
+}
+
+/**
  * The stream is done. Records the server's final prefill sample (authoritative
  * for the cross-check) as the turn's last sample, returns the final view, and
  * clears the turn. `timings` may be absent (no usage chunk / aborted turn).
@@ -191,7 +215,7 @@ export function onStreamEnd(
 	timings?: TurnTimings | null,
 ): RenderView {
 	const turn = s.turn;
-	if (!turn) return { phase: "idle" };
+	if (!turn) return { phase: "idle", draft: s.draft };
 	if (timings && timings.promptMs > 0) {
 		// timings.prompt_n is computed-tokens-only; the window's basis is total
 		// prompt progress (cached + new), so the final sample uses the total.
@@ -201,6 +225,7 @@ export function onStreamEnd(
 		turn.processed = totalPromptN;
 		turn.total = Math.max(turn.total, totalPromptN);
 	}
+	onTurnEnd(s, timings);
 	const v = view(s, turn);
 	s.turn = null;
 	return v;
@@ -223,6 +248,11 @@ export type SseEvent =
 
 function num(v: unknown): number {
 	return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/** Like `num`, but null marks an absent field (older server builds). */
+function numOrNull(v: unknown): number | null {
+	return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 /**
@@ -262,6 +292,8 @@ export function parseChunk(json: string): SseEvent | null {
 					completionN: num(t.predicted_n),
 					predictedMs: num(t.predicted_ms),
 					predictedPerSecond: num(t.predicted_per_second),
+					draftN: numOrNull(t.draft_n),
+					draftNAccepted: numOrNull(t.draft_n_accepted),
 				}
 			: null;
 		return { kind: "usage", timings };
@@ -373,7 +405,12 @@ export function renderLine(model: string, v: RenderView, sep: string = " · "): 
 	const tg = v.phase === "generating" ? `${fmt(v.tg ?? 0)}/s` : "-";
 	const cache =
 		v.phase === "prefill" && v.cachePct != null ? `${v.cachePct}%` : "-";
+	// persistent model-level state: same value in every phase
 	const draft =
-		v.phase === "generating" && v.spec != null ? `${v.spec.toFixed(1)}x` : "-";
+		v.draft?.kind === "value"
+			? `${v.draft.ratioPct}% ${v.draft.meanLen.toFixed(1)}x`
+			: v.draft?.kind === "unsupported"
+				? "not supported"
+				: "-";
 	return [model, status, `pf ${pf}`, `tg3s ${tg}`, `cache ${cache}`, `draft ${draft}`].join(sep);
 }

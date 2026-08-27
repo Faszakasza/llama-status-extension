@@ -1,5 +1,36 @@
 # PROGRESS
 
+## Session 2026-08-27 (3)
+
+Implemented change `draft-acceptance-mean-len`: per-turn draft figures from final-chunk timings, persistent draft state with empirical support detection, `/metrics` removed, 500 ms min-span floor for the speed windows.
+
+### Why
+
+- The `draft` field never showed anything (always `-`). Root cause reproduced live: the figure came from 2 s deltas of the Prometheus spec counters (`spec_decode_num_drafts_total` / `spec_decode_num_accepted_tokens_total`), but llama.cpp merges per-slot spec stats into those counters **only when a task completes** (`metrics_on_prediction`) — during a 39 s generating turn with 6 polls every delta was 0. The counters are also server-cumulative, the wrong basis for a per-turn figure.
+- The exact data of llama.cpp's own per-task stdout line (`draft acceptance = 0.43033 (349 accepted / 811 generated), mean len = 2.85`) is already on the wire: the tapped stream's final chunk carries per-turn `timings` with `draft_n` / `draft_n_accepted`. A second verified bug: `tg3s` divided a small delta by a millisecond span at turn start (MTP burst, 2–4 tokens within ≤2 ms → 1000 t/s spikes gliding down ~2.5 s).
+
+### Root-cause findings
+
+- `metrics_on_prediction()` merges per-slot spec stats into the Prometheus counters only at task end → the counters are frozen for the whole generating turn (reproduced: 6 polls, all deltas 0).
+- `server_slot_stats::to_json()` emits `draft_n` / `draft_n_accepted` in the per-turn `timings` iff the task's spec counter path ran (`n_draft_tokens > 0`); `/slots` never exposes the draft counters at all.
+- Ngram-only spec types (`ngram-map-k4v` / `ngram-mod`) leave all counters at 0 and emit no draft fields → empirical detection marks such models `not supported` after their first completed turn; future types that do run the counter path are automatically supported.
+
+### Implementation
+
+- `src/stats.ts`: `TurnTimings` gains nullable `draftN` / `draftNAccepted` (`numOrNull` in `parseChunk` — absent on older builds); new pure draft state machine on `StatsState` (`none` / `value {ratioPct, meanLen}` / `unsupported`) driven by `onTurnEnd(s, timings)` inside `onStreamEnd`: `draftN > 0` → value (ratio = round(accepted/draftN · 100) %, meanLen = 1 + accepted/(predicted_n − accepted), double-rounded through 2 decimals so `2.847 → 2.85 → 2.9x`); stats-less completed turn + `predictedN ≥ 1` + `none` → `unsupported` (never latched, self-heals); value otherwise kept. `RenderView.spec` → `draft` tri-state, rendered `draft -` / `draft not supported` / `draft NN% N.Nx` in every phase. `speed()` gains the 500 ms `MIN_SPAN_MS` floor (→ null → existing `0/s` path). Deleted `SpecCounters` / `specAcceptance` / `updateSpec` / `specPrev` / `specValue`. New `resetTurn()` for stream supersede (windows only); `reset()` keeps clearing the draft (model switch).
+- `src/index.ts`: `pollMetrics` + `parseMetric` deleted; the 2 s timer keeps `pollStatus()` only; the stream-end `timings` feed the draft state via the existing `applyEvent` path (superseded stream ends still dropped before `applyEvent`); idle and lifecycle renders carry the draft state; `start()` resets state only when the active model actually changes.
+- Tests: `stats.test.ts` spec-delta section rewritten to the state machine + both worked cases (`811/349 → 43% 2.9x`, `48/40/33 → 83% 3.2x`), `accepted=0 → 0% 1.0x`, absent fields, every transition, per-phase rendering, min-span floor (burst ≤100/s for the first 2 s, 3-token 400 ms turn `0/s`, 40-token 2 s window 20 t/s unchanged); `tap.test.ts` end-to-end: figure on the post-turn idle line, persistence through the next turn's prefill/generating lines, second turn update, `not supported` after a fresh model, model-switch reset, abort keeps state, zero `/metrics` + `/slots` over the whole run; `tests/live.ts` asserts a real draft figure and `metrics=0`.
+
+### Verification
+
+- `npm test` green (stats + tap), `npx tsc -p .` strict clean, `openspec validate draft-acceptance-mean-len --strict` valid. (Added `typescript`, `@types/node`, `@earendil-works/pi-coding-agent` as devDeps — `tsc` was not runnable in this environment before.)
+- Live (aurora router, MTP model Qwen3.6-35B-A3B): PASS — prefill/generating/idle, real figure on the idle line (e.g. `draft 72% 3.1x`), `metrics=0`, `slots=0`, six fields on every line, non-llama clear. Ngram-only verdict not re-run live (no ngram-only model currently on the router); covered by the unit tests and the empirical-detection design.
+- README examples verified byte-for-byte against `renderLine` output via a throwaway script.
+
+### Blockers
+
+- None. Archive ordering: `always-visible-footer-fields` (its 7/7 tasks are done) should be archived before this change — this delta's MODIFIED requirements assume the six-field main spec.
+
 ## Session 2026-08-27 (2)
 
 Implemented change `always-visible-footer-fields`: uniform six-field footer line + `separator` setting.
