@@ -1,7 +1,15 @@
 // tests/tap.test.ts — tap integration: original bytes pass through unmodified,
 // flag injection is target-only, phases fire in order, offline/abort semantics.
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import ext from "../src/index.ts";
+
+// hermetic: point the global settings path at an empty dir so the default
+// separator is used regardless of the host's real ~/.pi/agent/settings.json
+const globalDir = mkdtempSync(join(tmpdir(), "llama-stats-global-"));
+process.env.PI_CODING_AGENT_DIR = globalDir;
 
 const statuses: Array<string | undefined> = [];
 const handlers: Record<string, (e?: unknown, ctx?: unknown) => void> = {};
@@ -16,7 +24,9 @@ ext(pi);
 const ctx = {
 	model: { id: "m1", provider: "llama-server=http://fake.local:9" },
 	ui: { setStatus: (_k: string, v: string | undefined) => statuses.push(v) },
-} as never;
+	cwd: process.cwd(),
+	isProjectTrusted: () => false,
+};
 
 // ─── fake transport (installed before the tap, so the tap captures it) ───
 const requested: Array<{ url: string; body: unknown }> = [];
@@ -89,22 +99,21 @@ async function main() {
 	// ── phase sequence in the footer ──
 	assert.ok(
 		lines().some(
-			(l) =>
-				l.startsWith("m1 · pf ") && l.includes("40%") && l.includes("cache 33%"),
+			(l) => l.includes("active · pf") && l.includes("tg3s -") && l.includes("cache 33%"),
 		),
 		`prefill line with bar+cache seen, got: ${JSON.stringify(lines())}`,
 	);
 	assert.ok(
-		lines().some((l) => l.startsWith("m1 · pf ") && l.includes("100/s")),
+		lines().some((l) => l.includes("active · pf ") && l.includes("100/s")),
 		`pf speed line seen, got: ${JSON.stringify(lines())}`,
 	);
 	assert.ok(
-		lines().some((l) => l.startsWith("m1 · tg ")),
+		lines().some((l) => l.includes("active · pf - · tg3s ")),
 		`generating line seen, got: ${JSON.stringify(lines())}`,
 	);
 	assert.equal(
 		lines()[lines().length - 1],
-		"m1 · idle",
+		"m1 · idle · pf - · tg3s - · cache - · draft -",
 		"turn end returns to idle",
 	);
 
@@ -114,7 +123,7 @@ async function main() {
 	await tick();
 	assert.equal(
 		lines()[lines().length - 1],
-		"m1 · offline",
+		"m1 · offline · pf - · tg3s - · cache - · draft -",
 		"poll failure → offline",
 	);
 
@@ -126,12 +135,40 @@ async function main() {
 	await r2.read(); // first chunk: stream c2 opens, prefill line renders
 	await r2.cancel();
 	await tick();
-	assert.equal(lines()[lines().length - 1], "m1 · idle", "abort → idle");
+	assert.equal(
+		lines()[lines().length - 1],
+		"m1 · idle · pf - · tg3s - · cache - · draft -",
+		"abort → idle",
+	);
+
+	// ── separator: trusted project .pi/settings.json wins over the default ──
+	const sepDir = mkdtempSync(join(tmpdir(), "llama-stats-sep-"));
+	mkdirSync(join(sepDir, ".pi"), { recursive: true });
+	writeFileSync(
+		join(sepDir, ".pi", "settings.json"),
+		JSON.stringify({ separator: " | " }),
+	);
+	handlers.session_start(
+		{ reason: "startup" },
+		{
+			model: ctx.model,
+			ui: ctx.ui,
+			cwd: sepDir,
+			isProjectTrusted: () => true,
+		},
+	);
+	await tick();
+	assert.ok(
+		lines().some((l) => l === "m1 | unloaded | pf - | tg3s - | cache - | draft -"),
+		`project separator used, got: ${JSON.stringify(lines().slice(-3))}`,
+	);
+	rmSync(sepDir, { recursive: true, force: true });
 
 	// ── shutdown: fetch restored, status cleared ──
 	handlers.session_shutdown();
 	assert.equal(globalThis.fetch, fakeTransport, "original fetch restored");
 	assert.equal(statuses[statuses.length - 1], undefined, "status cleared");
+	rmSync(globalDir, { recursive: true, force: true });
 	console.log("tap.test.ts: all checks passed");
 }
 

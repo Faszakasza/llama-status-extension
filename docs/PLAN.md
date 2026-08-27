@@ -16,6 +16,13 @@ A pi extension that displays live statistics about the active llama.cpp model in
 
 Deliberately excluded: session token-usage/cost (another extension owns it), any new display figure derived from `timings` (cross-check only), RAM/VRAM (not exposed).
 
+### Footer format (uniform six-field line)
+
+- The line is always exactly six fields in fixed order — `model · status · pf … · tg3s … · cache … · draft …` — in every phase; a metric that is not actively updating shows `-` (no per-phase line shapes).
+- Status vocabulary: `idle`, `active` (a tapped turn mid-turn: prefill or generating), `loading`, `unloaded`, `offline` (unknown values such as `failed`/`sleeping` pass through as the raw word).
+- Field value windows: `pf` carries speed + 6-segment progress bar + processed % (prefill only); `tg3s` the generation speed (generating only); `cache` the KV-reuse % (prefill only, `-` until prompt tokens are observed); `draft` the spec-acceptance figure (generating only, when the server reports draft activity).
+- `separator` setting: the literal string joining the fields. Precedence: project `<cwd>/.pi/settings.json` (trusted projects only) > global `<getAgentDir()>/settings.json` > default `" · "`. Accepted only as a non-empty string (invalid type, empty string, or unreadable/corrupt file → default); read once per `session_start`, no mid-session reload. `renderLine(model, view, sep)` in `stats.ts` stays pi-free (the separator is a plain parameter).
+
 ## Design
 
 - **Where**: publishable pi package at the repo root (same layout as `gsanhueza/pi-llama-cpp`):
@@ -55,6 +62,7 @@ Deliberately excluded: session token-usage/cost (another extension owns it), any
 - [x] Packaged as a pi package (repo-root `package.json` + `src/` layout, matching `pi-llama-cpp`); `pi config -l` shows `.. → [x] src/index.ts`
 - [x] SSE tap (openspec change `sse-tap-stats`): in-turn stats from the tapped `/chat/completions` stream; `/slots` polling deleted; `/metrics` gated on stream-generating; latest-wins stream tracking; final `timings` recorded as the turn's last sample; live-verified on aurora (full turn on the Chat model, spec figure when counters advanced, subagent concurrency, mid-turn model switch, lifecycle, non-llama clear, zero `/slots` requests)
 - [x] `sse-tap-stats` archived (2026-08-27): delta synced to the main spec (1 added / 7 modified / 1 removed), change moved to `openspec/changes/archive/2026-08-27-sse-tap-stats/`
+- [x] Uniform six-field footer (openspec change `always-visible-footer-fields`): every phase renders `model · status · pf · tg3s · cache · draft` with `-` for non-updating metrics; `active` covers prefill + generating; `separator` setting (project trusted > global > default `" · "`, once per session); live-verified on aurora (full prefill→generating→idle turn, non-llama clear, zero `/slots`)
 
 ## Known limitations
 

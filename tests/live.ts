@@ -6,6 +6,7 @@ const BASE = "http://aurora.home.lan:10000";
 const MODEL = "Qwen3.6-35B-A3B";
 
 const lines: string[] = [];
+const events: Array<string | undefined> = [];
 const urls: string[] = [];
 const handlers: Record<string, (e?: unknown, ctx?: unknown) => void> = {};
 
@@ -34,12 +35,15 @@ async function main() {
 			model: { id: MODEL, provider: `llama-server=${BASE}` },
 			ui: {
 				setStatus: (_k: string, v: string | undefined) => {
+					events.push(v);
 					if (v) {
 						lines.push(v);
 						console.log("[live] footer:", v);
 					}
 				},
 			},
+			cwd: process.cwd(),
+			isProjectTrusted: () => false,
 		} as never,
 	);
 
@@ -63,8 +67,18 @@ async function main() {
 	await res.text();
 	const dt = ((Date.now() - t0) / 1000).toFixed(1);
 
-	await new Promise((r) => setTimeout(r, 2500)); // post-turn poll
-	handlers.session_shutdown();
+	await new Promise((r) => setTimeout(r, 2500)); // post-turn poll settles
+	// non-llama model → footer clears
+	handlers.model_select(
+		undefined,
+		{
+			model: { id: "not-llama", provider: "openai" },
+			ui: {
+				setStatus: (_k: string, v: string | undefined) => events.push(v),
+			},
+		} as never,
+	);
+	const cleared = events[events.length - 1] === undefined;
 
 	const count = (frag: string) => urls.filter((u) => u.includes(frag)).length;
 	console.log(`[live] turn took ${dt}s`);
@@ -72,12 +86,17 @@ async function main() {
 		`[live] requests: models=${count("/v1/models")} metrics=${count("/metrics")} chat=${count("/chat/completions")} slots=${count("/slots")}`,
 	);
 
-	const hasPf = lines.some((l) => l.includes("pf "));
-	const hasTg = lines.some((l) => l.startsWith(`${MODEL} · tg `));
-	const idle = lines[lines.length - 1] === `${MODEL} · idle`;
-	const ok = hasPf && hasTg && idle && count("/slots") === 0;
+	const idleLine = `${MODEL} · idle · pf - · tg3s - · cache - · draft -`;
+	const hasPf = lines.some((l) => l.includes("active · pf "));
+	const hasTg = lines.some((l) => l.includes("active · pf - · tg3s "));
+	const idle = lines[lines.length - 1] === idleLine;
+	const sixFields = lines.every(
+		(l) => l.split(" · ").length === 6,
+	);
+	const ok =
+		hasPf && hasTg && idle && sixFields && cleared && count("/slots") === 0;
 	console.log(
-		`[live] prefill=${hasPf} generating=${hasTg} idle=${idle} noSlots=${count("/slots") === 0}`,
+		`[live] prefill=${hasPf} generating=${hasTg} idle=${idle} sixFields=${sixFields} nonLlamaClear=${cleared} noSlots=${count("/slots") === 0}`,
 	);
 	console.log(ok ? "[live] PASS" : "[live] FAIL");
 	process.exit(ok ? 0 : 1);

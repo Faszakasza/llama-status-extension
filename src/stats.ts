@@ -362,25 +362,18 @@ function bar(frac: number): string {
 	return "▓".repeat(f) + "░".repeat(w - f);
 }
 
-/** Render the single footer line. */
-export function renderLine(model: string, v: RenderView): string {
-	switch (v.phase) {
-		case "offline":
-			return `${model} · offline`;
-		case "idle":
-			return `${model} · idle`;
-		case "prefill": {
-			const pct = Math.round((v.barFrac ?? 0) * 100);
-			const cache = v.cachePct == null ? "" : ` cache ${v.cachePct}%`;
-			return `${model} · pf ${fmt(v.pf ?? 0)}/s ${bar(v.barFrac ?? 0)} ${pct}%${cache}`;
-		}
-		case "generating": {
-			const spec = v.spec == null ? "" : ` spec ${v.spec.toFixed(1)}x`;
-			return `${model} · tg ${fmt(v.tg ?? 0)}/s${spec}`;
-		}
-		case "loading":
-			return `${model} · loading`;
-		case "unloaded":
-			return `${model} · unloaded`;
-	}
+/** Render the single footer line: six uniform fields joined by `sep`. */
+export function renderLine(model: string, v: RenderView, sep: string = " · "): string {
+	const status =
+		v.phase === "prefill" || v.phase === "generating" ? "active" : v.phase;
+	const pf =
+		v.phase === "prefill"
+			? `${fmt(v.pf ?? 0)}/s ${bar(v.barFrac ?? 0)} ${Math.round((v.barFrac ?? 0) * 100)}%`
+			: "-";
+	const tg = v.phase === "generating" ? `${fmt(v.tg ?? 0)}/s` : "-";
+	const cache =
+		v.phase === "prefill" && v.cachePct != null ? `${v.cachePct}%` : "-";
+	const draft =
+		v.phase === "generating" && v.spec != null ? `${v.spec.toFixed(1)}x` : "-";
+	return [model, status, `pf ${pf}`, `tg3s ${tg}`, `cache ${cache}`, `draft ${draft}`].join(sep);
 }

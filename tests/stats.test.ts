@@ -294,28 +294,51 @@ const tokens = (s: StatsState, times: number[]): RenderView => {
 	const R = (
 		o: Partial<RenderView> & { phase: RenderView["phase"] },
 	): RenderView => o;
-	assert.equal(renderLine("M", R({ phase: "idle" })), "M · idle");
-	assert.equal(renderLine("M", R({ phase: "loading" })), "M · loading");
-	assert.equal(renderLine("M", R({ phase: "unloaded" })), "M · unloaded");
-	assert.equal(renderLine("M", R({ phase: "offline" })), "M · offline");
 	assert.equal(
-		renderLine(
-			"M",
-			R({ phase: "prefill", pf: 1800, barFrac: 0.34, cachePct: 97 }),
-		),
-		"M · pf 1.8k/s ▓▓░░░░ 34% cache 97%",
+		renderLine("M", R({ phase: "idle" })),
+		"M · idle · pf - · tg3s - · cache - · draft -",
 	);
+	assert.equal(
+		renderLine("M", R({ phase: "loading" })),
+		"M · loading · pf - · tg3s - · cache - · draft -",
+	);
+	assert.equal(
+		renderLine("M", R({ phase: "unloaded" })),
+		"M · unloaded · pf - · tg3s - · cache - · draft -",
+	);
+	assert.equal(
+		renderLine("M", R({ phase: "offline" })),
+		"M · offline · pf - · tg3s - · cache - · draft -",
+	);
+	// prefill: speed + bar + pct, cache value, tg3s/draft dashes
+	assert.equal(
+		renderLine("M", R({ phase: "prefill", pf: 1800, barFrac: 0.34, cachePct: 97 })),
+		"M · active · pf 1.8k/s ▓▓░░░░ 34% · tg3s - · cache 97% · draft -",
+	);
+	// prefill: null cachePct → cache dash
 	assert.equal(
 		renderLine("M", R({ phase: "prefill", pf: 78, barFrac: 0, cachePct: null })),
-		"M · pf 78/s ░░░░░░ 0%",
+		"M · active · pf 78/s ░░░░░░ 0% · tg3s - · cache - · draft -",
 	);
+	// prefill: missing barFrac/pf → 0
+	assert.equal(
+		renderLine("M", R({ phase: "prefill" })),
+		"M · active · pf 0/s ░░░░░░ 0% · tg3s - · cache - · draft -",
+	);
+	// generating: tg3s + spec
 	assert.equal(
 		renderLine("M", R({ phase: "generating", tg: 78, spec: 1.9 })),
-		"M · tg 78/s spec 1.9x",
+		"M · active · pf - · tg3s 78/s · cache - · draft 1.9x",
 	);
+	// generating: null spec → draft dash
 	assert.equal(
 		renderLine("M", R({ phase: "generating", tg: 1234 })),
-		"M · tg 1.2k/s",
+		"M · active · pf - · tg3s 1.2k/s · cache - · draft -",
+	);
+	// custom separator
+	assert.equal(
+		renderLine("M", R({ phase: "idle" }), " | "),
+		"M | idle | pf - | tg3s - | cache - | draft -",
 	);
 }
 

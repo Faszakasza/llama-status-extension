@@ -3,10 +3,14 @@
 // requests); only the lifecycle status (/v1/models) and spec metrics
 // (/metrics) are still polled, and /metrics only while a turn is generating.
 // Pure logic lives in stats.ts.
-import type {
-	ExtensionAPI,
-	ExtensionContext,
+import {
+	CONFIG_DIR_NAME,
+	getAgentDir,
+	type ExtensionAPI,
+	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
 	type RenderView,
@@ -43,6 +47,38 @@ function extractId(json: string): string | null {
 	}
 }
 
+const DEFAULT_SEPARATOR = " · ";
+let separator = DEFAULT_SEPARATOR;
+
+function readSeparator(path: string): string | null {
+	try {
+		const o = JSON.parse(readFileSync(path, "utf8")) as {
+			separator?: unknown;
+		};
+		if (typeof o?.separator === "string" && o.separator.length > 0)
+			return o.separator;
+	} catch {
+		// unreadable or corrupt settings file: fall through
+	}
+	return null;
+}
+
+// Project (trusted) > global > default. Read once per session; never throws.
+function resolveSeparator(cwd: string, trusted: boolean): void {
+	const paths = [
+		...(trusted ? [join(cwd, CONFIG_DIR_NAME, "settings.json")] : []),
+		join(getAgentDir(), "settings.json"),
+	];
+	for (const p of paths) {
+		const sep = readSeparator(p);
+		if (sep) {
+			separator = sep;
+			return;
+		}
+	}
+	separator = DEFAULT_SEPARATOR;
+}
+
 // ponytail: no API key support; local routers without --api-key work.
 // Add readStoredCredential(model.provider) header if a keyed server ever shows up.
 export default function (pi: ExtensionAPI) {
@@ -63,7 +99,7 @@ export default function (pi: ExtensionAPI) {
 		if (!ui || !target) return;
 		ui.setStatus(
 			STATUS_KEY,
-			typeof v === "string" ? v : renderLine(target.model, v),
+			typeof v === "string" ? v : renderLine(target.model, v, separator),
 		);
 	}
 
@@ -222,11 +258,11 @@ export default function (pi: ExtensionAPI) {
 			if (tracker.activeId) return; // a turn is live: don't overwrite the phase line
 			if (value === "loaded") renderIdle();
 			else if (value === "loading" || value === "unloaded")
-				render(renderLine(target.model, { phase: value } satisfies RenderView));
+				render(renderLine(target.model, { phase: value } satisfies RenderView, separator));
 			else render(`${target.model} · ${value}`); // failed/sleeping/etc
 		} catch {
 			if (tracker.activeId) return; // a live stream is the ground truth
-			render(renderLine(target.model, { phase: "offline" } satisfies RenderView));
+			render(renderLine(target.model, { phase: "offline" } satisfies RenderView, separator));
 		}
 	}
 
@@ -322,6 +358,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (event, ctx) => {
+		resolveSeparator(ctx.cwd, ctx.isProjectTrusted());
 		if (event.reason === "startup") applyModel(ctx);
 	});
 	pi.on("model_select", (_event, ctx) => {

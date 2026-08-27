@@ -1,5 +1,29 @@
 # PROGRESS
 
+## Session 2026-08-27 (2)
+
+Implemented change `always-visible-footer-fields`: uniform six-field footer line + `separator` setting.
+
+### Why
+
+- The footer swapped whole line layouts per phase (`· idle`, `pf …`, `tg …`), so figures moved position between phases and a non-updating metric was indistinguishable from a zero; the `·` separator was hardcoded, with no escape for narrow terminals or themes where the middle dot renders poorly.
+
+### Implementation
+
+- `src/stats.ts`: `renderLine(model, view, sep = " · ")` — one uniform six-field formatter (model, status, `pf …`, `tg3s …`, `cache …`, `draft …`); `prefill`/`generating` map to status `active`, other phases pass through; non-updating fields render `-` (progress bar stays attached to `pf`, prefill only). `RenderView` unchanged.
+- `src/index.ts`: `separator` resolved once per `session_start` — project `<cwd>/.pi/settings.json` (via `CONFIG_DIR_NAME`) only when `ctx.isProjectTrusted()`, else global `<getAgentDir()>/settings.json`, else `" · "`; each file read in try/catch, `.separator` accepted only as a non-empty string; stored module-level and passed into all three `renderLine` call sites.
+- Tests: `stats.test.ts` render assertions re-pointed (all six phase lines, dash fields, bar only in prefill) + custom-separator and null `spec`/`cachePct` cases; `tap.test.ts` exact lines updated + one separator case (trusted temp project dir with `.pi/settings.json {"separator": " | "}`; global path made hermetic via `PI_CODING_AGENT_DIR`); `tests/live.ts` now asserts six fields on every rendered line and the non-llama clear.
+- `README.md`: example block replaced with the six-field lines (verified byte-for-byte against `renderLine` output via a throwaway script) and the `separator` setting documented (location, precedence, default, lifetime).
+
+### Verification
+
+- `npm test` green (stats + tap), strict tsc clean, `openspec validate --strict` clean (two informational MD041 advisories only).
+- Live (aurora router, Chat model Qwen3.6-35B-A3B): one full prefill→generating→idle turn — every footer line uniformly six-field (`sixFields=true`), idle line after the turn, non-llama model select clears the status (`nonLlamaClear=true`), zero `/slots` requests; 33 s turn, `metrics=1 chat=1`.
+
+### Blockers
+
+- None.
+
 ## Session 2026-08-27
 
 Implemented change `sse-tap-stats`: replaced the 500 ms `/slots` polling with an in-process tap on the active model's `/chat/completions` SSE stream.

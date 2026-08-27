@@ -1,4 +1,14 @@
 # CHANGES
+
+## 2026-08-27 — Uniform six-field footer + `separator` setting (change `always-visible-footer-fields`)
+
+- **BREAKING (display format only)**: the footer line is now always six fields in fixed order — `model · status · pf · tg3s · cache · draft` — regardless of phase; a metric that is not actively updating shows `-` (previously the line shape changed per phase: `model · idle`, `model · pf …`, `model · tg …`).
+- New status field: `idle`, `active` (a tapped turn mid-turn, prefill or generating), `loading`, `unloaded`, `offline`.
+- `stats.ts`: `renderLine(model, view, sep = " · ")` is now a single uniform formatter; the phase still decides which fields carry values (`RenderView` unchanged).
+- `index.ts`: `separator` setting read once per `session_start` — project `.pi/settings.json` (trusted projects only, via `CONFIG_DIR_NAME`/`ctx.isProjectTrusted()`) > global `~/.pi/agent/settings.json` (`getAgentDir()`) > default `" · "`; each file read in try/catch, only a non-empty string accepted, invalid/corrupt → default, never crashes; passed into all three `renderLine` call sites.
+- Tests: `stats.test.ts` re-pointed to the six-field format (plus custom-separator and null `spec`/`cachePct` cases); `tap.test.ts` exact lines updated + separator case (trusted temp project dir; hermetic global settings dir via `PI_CODING_AGENT_DIR`); `tests/live.ts` asserts six fields on every line and the non-llama clear. `npm test` green, strict tsc clean.
+- Live (aurora, Chat model Qwen3.6-35B-A3B): one full prefill→generating→idle turn, every footer line uniformly six-field, non-llama model clears the status, zero `/slots` requests.
+- `README.md`: examples replaced (verified byte-for-byte against `renderLine` output) and the `separator` setting documented (location, precedence, default, lifetime).
 ## 2026-08-27 — Archived `sse-tap-stats`, synced main spec
 
 - Synced the delta into `openspec/specs/llama-stats-footer/spec.md`: added `Concurrent stream handling`, rewrote the 7 modified requirements around the SSE tap (lifecycle, idle, prefill, generation, window speeds, KV-cache ratio, model lifecycle), removed `Busiest slot selection` (no `/slots` polling). `openspec validate --specs` passes.
