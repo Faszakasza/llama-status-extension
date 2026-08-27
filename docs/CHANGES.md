@@ -1,5 +1,16 @@
 # CHANGES
 
+## 2026-08-27 — SSE stream tap replaces /slots polling (change `sse-tap-stats`)
+
+- In-turn stats now come from an in-process tap on the active model's `/chat/completions` SSE response (`globalThis.fetch` wrapper, restored on `session_shutdown` / non-llama switch): injects `return_progress` + `stream_options.include_usage` into string request bodies (mutation skipped on parse failure or non-string body), parses `prompt_progress` events, per-token deltas (`content` **and** `reasoning_content` — thinking models), and the final `usage`/`timings` chunk; re-emits the original response bytes unchanged, so the agent's stream is untouched.
+- `stats.ts`: `observe()`/`SlotView`/`pickSlot`/counter-drop turn detection replaced by `onProgress` / `onToken` / `onStreamEnd` over the same state, plus pure SSE parsing (`parseChunk`) and latest-wins stream tracking (`createTracker`/`classify`/`openStream`/`closeStream`). Windows, cache %, spec acceptance, and rendering survive intact.
+- The final chunk's server `timings` are recorded as the turn's last window sample (total basis: `prompt_n + cache_n`, since `prompt_n` excludes cached tokens), so the window's final pf cross-checks `timings.prompt_per_second` (`LLAMA_STATS_DEBUG` logs both).
+- Removed: the 500 ms `/slots` polling loop, `parseSlot`, the `slotsInFlight` guard, and slot selection — zero `/slots` requests now.
+- Re-gated: `/metrics` runs only while a tapped stream is generating (was: model loaded); `/v1/models` @ 2 s kept for lifecycle, with its render suppressed while a stream is active; status-poll failure with no stream → `· offline`; stream abort/error → idle, not offline.
+- Concurrent turns: latest-wins — a new stream supersedes the active one (fresh windows), late events from superseded streams are dropped, and closing a superseded stream does not idle the newest one.
+- Router load: active turn ≈3.0 → ≈1.0 req/s; loaded-idle 1.0 → 0.5 req/s; unloaded unchanged (0.5).
+- Tests: `stats.test.ts` re-pointed to stream events; `tap.test.ts` added (pass-through bytes, target-only flag injection, phase sequencing, offline/abort semantics, fetch restore); `tests/live.ts` for manual live runs. `npm test` green, strict tsc clean, live-verified on aurora (Chat model full turn incl. spec figure, subagent concurrency, mid-turn model switch, `unloaded → loading → idle`, non-llama clear).
+
 ## 2026-08-26 — pi package layout (restructure)
 
 - Restructured the repo into a publishable pi package (same layout as `gsanhueza/pi-llama-cpp`): `package.json` with a `pi` manifest (`pi.extensions: ["./src/index.ts"]`, `pi-package` keyword), source in `src/`, tests in `tests/`, `tsconfig.json`, `README.md`.

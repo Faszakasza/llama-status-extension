@@ -11,7 +11,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "test": "jiti tests/stats.test.ts"
+    "test": "jiti tests/stats.test.ts && jiti tests/tap.test.ts"
   },
   "repository": {
     "type": "git",

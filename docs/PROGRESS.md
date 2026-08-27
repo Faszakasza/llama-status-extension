@@ -1,5 +1,32 @@
 # PROGRESS
 
+## Session 2026-08-27
+
+Implemented change `sse-tap-stats`: replaced the 500 ms `/slots` polling with an in-process tap on the active model's `/chat/completions` SSE stream.
+
+### Why
+
+- The old version hit the router ~3 req/s during a turn (`/slots` @ 2 Hz + `/v1/models` + `/metrics`) and kept polling `/metrics` while the model was merely loaded; every displayed speed was a 2 Hz sample of cumulative counters, so the 3 s windows carried fetch-latency skew.
+- Live probe (aurora router) showed llama.cpp pushes exact per-turn data inside the stream pi already consumes: `prompt_progress` (`{total, cache, processed, time_ms}` at ~1.4 Hz) when the request sets `return_progress: true`, and a final `usage` + server `timings` chunk when `stream_options.include_usage: true`. The router passes both through unmodified.
+
+### Implementation
+
+- `src/index.ts`: `globalThis.fetch` wrapper — intercepts only `/chat/completions` to the current target's base URL, injects `return_progress` + `stream_options.include_usage` into string bodies with `stream: true` (non-string/unparseable body passes through unmutated; the tap then degrades to the lifecycle line), wraps the response in a pass-through `ReadableStream` re-emitting the original bytes unchanged. Deleted `pollSlots`/`parseSlot`/`slotsInFlight`. Restored on `session_shutdown` / non-llama switch.
+- `src/stats.ts`: `observe()`/`SlotView`/`pickSlot`/counter-drop turn detection replaced by `onProgress`/`onToken`/`onStreamEnd` + pure `parseChunk` + latest-wins `StreamTracker` (new unseen `chatcmpl-…` id supersedes, late events dropped, superseded close is a no-op). Token = non-empty `delta.content` **or** `delta.reasoning_content` (thinking models). `onStreamEnd` records the final `timings` as the turn's last pf sample on the total basis (`prompt_n + cache_n`). Windows/cache/spec/rendering unchanged.
+- Re-gating: `/metrics` only while a tapped stream is generating; `/v1/models` @ 2 s lifecycle render suppressed while a stream is active; status-poll failure without a stream → `· offline`; stream abort/error → idle, not offline.
+- Baseline committed first (`fix: idle phase in observe()...`); `npm test` + strict tsc green after each step.
+
+### Verification
+
+- Unit: `stats.test.ts` (re-pointed to stream events) + `tap.test.ts` (pass-through bytes, target-only injection, phase sequencing, offline/abort, fetch restore) — `npm test` green via jiti; strict tsc clean.
+- Live (aurora, Chat model Qwen3.6-35B-A3B, so the Coder cache is never evicted): full turn prefill bar + cache % tracking `prompt_progress`, tg tracking generation, turn end → idle, spec figure when counters advanced; zero `/slots` requests (request log); active turn ≈1.0 req/s, loaded-idle ≈0.5 req/s.
+- Cross-check (task 5.3): the window's final pf vs the same turn's `timings.prompt_per_second` within a few percent, for one captured turn.
+- Edge cases: concurrent subagent turn (latest-wins visible), mid-turn model switch (reset + tap re-targets), `unloaded → loading → idle` lifecycle, non-llama model (status cleared).
+
+### Blockers
+
+- None. `pi-llama-cpp-stats` stays installed in this environment; the two `fetch` patches chain and its working-message bar is now a redundant subset (documented, not uninstalled — user's call).
+
 ## Session 2026-08-26
 
 Built the llama-stats footer extension (change `llama-footer-stats`) from scratch.
