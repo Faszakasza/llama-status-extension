@@ -12,4 +12,4 @@
 
 - [x] 3.1 Update `README.md`: replace the example block with the six-field lines (idle/active-prefill/active-generating/loading/unloaded/offline) and document the `separator` setting (location, precedence, default `" · "`); verify examples match `renderLine` output byte-for-byte
 - [x] 3.2 Run full verification: `npm test`, `npx tsc -p .`, `openspec validate --strict`, and a manual live run against the aurora router (idle line, one full prefill→generating→idle turn, non-llama clear); verify footer shows the uniform six-field line in every phase
-- [ ] 3.3 Update `docs/PLAN.md` (status + format section), `docs/CHANGES.md` (timestamped entry), `docs/PROGRESS.md` (session section); commit and push; verify `git status` clean and remote updated
+- [x] 3.3 Update `docs/PLAN.md` (status + format section), `docs/CHANGES.md` (timestamped entry), `docs/PROGRESS.md` (session section); commit and push; verify `git status` clean and remote updated
